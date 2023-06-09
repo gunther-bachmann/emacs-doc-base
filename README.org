@@ -1,0 +1,18 @@
+#+title: DocBase
+WARNING: This project is currently under heavy development. Use at your own risk.
+
+* Rationale
+DocBase is a set of tools useful to get the following
+- file documents in a folder hierarchy that may change any time
+- have persistent org references to these files
+- provide a useful ui to file new documents
+ 
+This is done by creating hard links of all files in a single folder.  Org
+references point to those files (which will never be moved).  Now other files
+(hard linked) to these files (in the doc-base) can now be safely filed into
+changing folder hierarchies without invalidating the org link. The org links can
+be resolved to the the file in this hierarchy, if needed.
+
+* TODO implement flow /refile/
+* TODO implement flow /persistent org-ref/
+
