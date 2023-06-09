@@ -26,9 +26,20 @@
 
 (defun doc-base--find-inode-in-doc-base (inode)
   "get doc-base filename for an inode"
-  (string-trim (shell-command-to-string (format "find %s -inum %i" doc-base--root inode))))
+  (doc-base--find-inode-in inode doc-base--root))
 
-;; (doc-base--find-inode-in-doc-base (doc-base--get-inode-of-file "/home/pe/Downloads/anatomy_of_lisp.pdf"))
+(defun doc-base--find-inode-in-books (inode)
+  "get doc-base filename for an inode"
+  (doc-base--find-inode-in inode doc-base--books))
+
+(defun doc-base--find-inode-in (inode folder)
+  "get filename for an inode in folder"
+  (let ((fn (string-trim (shell-command-to-string (format "find %s -inum %i" folder inode)))))
+    (unless (string-empty-p fn)
+      fn)))
+
+
+;; (doc-base--find-inode-in-books (doc-base--get-inode-of-file "/home/pe/documents/docbase/20230608.anatomy_of_lisp.pdf"))
 
 (defun doc-base--normalize-name (filename)
   "normalize the given base file name"
@@ -56,6 +67,7 @@
 (defun doc-base--insert-document-into-dired-sidebar ()
   "file/move/rename doc initially identified for filing 
 into folder currently under cursor in the sidebar"
+  (interactive)
   (if (and (equalp major-mode 'dired-sidebar-mode)
          (file-exists-p doc-base--file-to-move))
       (when-let* ((target (or (dired-file-name-at-point) doc-base--books))
@@ -63,10 +75,13 @@ into folder currently under cursor in the sidebar"
                   (target-folder (file-name-directory target))
                   (new-name (format "%s%s.%s" target-folder
                                     (file-name-base doc-base--file-to-move)
-                                    (file-name-extension doc-base--file-to-move))))        
-        ;; (dired-rename-file doc-base--file-to-move new-name)
-        (setq doc-base--file-to-move nil)
-        (message "filed to '%s'" new-name))
+                                    (file-name-extension doc-base--file-to-move))))
+        (unwind-protect
+            (progn
+              (dired-rename-file doc-base--file-to-move new-name nil)
+              (setq doc-base--file-to-move nil)
+              (message "filed to '%s'" new-name))
+          (when doc-base--file-to-move (message "failed to name %s to %s" doc-base--file-to-move new-name))))
     (message "file '%s' not found for moving (maybe just old binding of 'i', will now be restored)"))
   (doc-base--cleanup-bindings))
 
@@ -109,7 +124,7 @@ returning t on success, nil on abort"
         (progn
           (unwind-protect
               (progn
-                (when rename-p (dired-rename-file file normalized))
+                (when rename-p (dired-rename-file file normalized nil))
                 (dired-hardlink normalized link-name)
                 (message (if rename-p "renaming and hardlinking done." "hardlinking done."))
                 (setq doc-base--file-to-move normalized)
@@ -134,7 +149,7 @@ returning t on success, nil on abort"
       (progn
         (message "use 'i' to file in sidebar")
         (doc-base--provide-dired-sidebar-for-filing))
-      (gb/alert-message-notify-dunst '(:message "file not eligable to process on" :title "doc-base"))))
+      (gb/alert-message-notify-dunst '(:message "aborted filing, preconditions not met" :title "doc-base"))))
 
 (provide 'doc-base)
 
