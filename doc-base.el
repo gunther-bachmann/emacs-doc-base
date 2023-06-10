@@ -1,8 +1,12 @@
 (require 'dired+)
+(require 'dired-sidebar)
 
 (defcustom doc-base--root (expand-file-name "~/documents/docbase") "root to place documents into")
 (defcustom doc-base--books (expand-file-name "~/documents/books") "root of dir structure for documents")
 (defcustom doc-base--valid-filename-chars "a-z0-9-._" "regexp character-set definition")
+
+(defvar doc-base--previous-function-in-dired-sidebar #'dired-maybe-insert-subdir "cached binding of 'i' in dired-sidebar")
+(defvar doc-base--file-to-move nil "currently selected file for filing")
 
 ;; flow: inbox (function: doc-base--file)
 ;; - identify document in dired 
@@ -38,7 +42,6 @@
     (unless (string-empty-p fn)
       fn)))
 
-
 ;; (doc-base--find-inode-in-books (doc-base--get-inode-of-file "/home/pe/documents/docbase/20230608.anatomy_of_lisp.pdf"))
 
 (defun doc-base--normalize-name (filename)
@@ -60,9 +63,6 @@
 ;;                           (--map (s-chop-prefix folder it)
 ;;                                  (string-split (shell-command-to-string (format "find %s -maxdepth 1 -type d " folder))))))
 ;;          'string<)))
-
-(defvar doc-base--previous-function-in-dired-sidebar #'dired-maybe-insert-subdir "cached binding of 'i' in dired-sidebar")
-(defvar doc-base--file-to-move nil "currently selected file for filing")
 
 (defun doc-base--refresh-views-on-dirs (folders)
   "revert all dired buffers showing the given folders"
@@ -98,13 +98,20 @@ into folder currently under cursor in the sidebar"
 (defun doc-base--provide-dired-sidebar-for-filing ()
   "open sidbar and bind 'i' for inserting previously selected document"
   (let ((default-directory doc-base--books))
-    (when (dired-sidebar-buffer)
-      (dired-sidebar-hide-sidebar))
     (when (not (equalp #'doc-base--insert-document-into-dired-sidebar
                      (keymap-lookup dired-sidebar-mode-map "i")))
-      (setq doc-base--previous-function-in-dired-sidebar (keymap-lookup dired-sidebar-mode-map "i")))      
+      (setq doc-base--previous-function-in-dired-sidebar (keymap-lookup dired-sidebar-mode-map "i")))
     (bind-key "i" #'doc-base--insert-document-into-dired-sidebar dired-sidebar-mode-map)
-    (dired-sidebar-toggle-with-current-directory)))
+    (if (and (dired-sidebar-buffer)
+           (string-equal
+            (expand-file-name
+             (with-current-buffer (dired-sidebar-buffer)
+               dired-directory))
+            (format "%s/" doc-base--books)))
+        (dired-sidebar-jump-to-sidebar)
+      (when (dired-sidebar-buffer)
+        (dired-sidebar-hide-sidebar))
+      (dired-sidebar-toggle-with-current-directory))))
 
 (defun doc-base--cleanup-bindings ()
   "cleanup (possibly) dangling insert binding from dired-sidebar"
@@ -167,4 +174,3 @@ returning t on success, nil on abort"
       (gb/alert-message-notify-dunst '(:message "aborted filing, preconditions not met" :title "doc-base"))))
 
 (provide 'doc-base)
-
