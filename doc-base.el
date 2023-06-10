@@ -64,6 +64,13 @@
 (defvar doc-base--previous-function-in-dired-sidebar #'dired-maybe-insert-subdir "cached binding of 'i' in dired-sidebar")
 (defvar doc-base--file-to-move nil "currently selected file for filing")
 
+(defun doc-base--refresh-views-on-dirs (folders)
+  "revert all dired buffers showing the given folders"
+  (-each folders
+    (lambda (folder)
+      (--each (dired-buffers-for-dir folder )
+        (with-current-buffer it (revert-buffer))))))
+
 (defun doc-base--insert-document-into-dired-sidebar ()
   "file/move/rename doc initially identified for filing 
 into folder currently under cursor in the sidebar"
@@ -79,6 +86,9 @@ into folder currently under cursor in the sidebar"
         (unwind-protect
             (progn
               (dired-rename-file doc-base--file-to-move new-name nil)
+              (doc-base--refresh-views-on-dirs
+               (list (file-name-directory doc-base--file-to-move)
+                     (file-name-directory new-name)))
               (setq doc-base--file-to-move nil)
               (message "filed to '%s'" new-name))
           (when doc-base--file-to-move (message "failed to name %s to %s" doc-base--file-to-move new-name))))
@@ -110,11 +120,13 @@ into folder currently under cursor in the sidebar"
 returning t on success, nil on abort"
   (let* ((name-base (file-name-base file))
          (name-ext (file-name-extension file))
-         (normalized-base (doc-base--normalize-name name-base))
+         (normalized-base-proposed (doc-base--normalize-name name-base))
+         (normalized-base (read-string "new filename: " normalized-base-proposed))
          (normalized-file (string-join (list normalized-base name-ext) "."))
          (dateprefix (format-time-string "%Y%m%d" (current-time)))
          (normalized (string-join (list (file-name-directory file) normalized-file) ""))
-         (link-file-name (string-join (list dateprefix normalized-base name-ext) "."))
+         (link-file-name-proposed (string-join (list dateprefix normalized-base name-ext) "."))
+         (link-file-name (read-string "filename for docbase: " link-file-name-proposed))
          (link-name (string-join (list doc-base--root link-file-name) "/"))
          (rename-p (not (doc-base--normal-name-p name-base)))
          (msg (if rename-p
@@ -126,6 +138,9 @@ returning t on success, nil on abort"
               (progn
                 (when rename-p (dired-rename-file file normalized nil))
                 (dired-hardlink normalized link-name)
+                (doc-base--refresh-views-on-dirs
+                 (list (file-name-directory normalized)
+                       (file-name-directory link-name)))
                 (message (if rename-p "renaming and hardlinking done." "hardlinking done."))
                 (setq doc-base--file-to-move normalized)
                 t)
