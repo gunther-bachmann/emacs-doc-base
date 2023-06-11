@@ -46,6 +46,42 @@
 ;; - get doc-base name for i-node
 ;; - provide reference to doc-base name
 
+(defun doc-base--org-link-follow (path _)
+  (if-let* ((inode (doc-base--get-inode-of-file (format "%s/%s" doc-base--root path)))
+              (file (doc-base--find-inode-in-books inode)))
+      (find-file file)
+    (find-file path)))
+
+(defun doc-base--org-link-store ()
+  "Store a link to a dired file in the doc base."
+  (when (memq major-mode '(dired-mode dired-sidebar-mode))
+    ;; This is a man page, we do make this link.
+    (when-let* ((file (dired-get-file-for-visit))
+                (inode (doc-base--get-inode-of-file file))
+                (docbase-file (doc-base--find-inode-in-doc-base inode))
+                (link (concat "docbase:" (file-name-nondirectory docbase-file)))
+                (description (replace-regexp-in-string "^[0-9.]*" "" (file-name-nondirectory docbase-file))))
+      (org-link-store-props
+       :type "docbase"
+       :link link
+       :description description))))
+
+(defun doc-base--org-link-export (link description format _)
+  (let ((path (format "%s" link))
+        (desc (or description link)))
+    (pcase format
+      (`html (format "<a target=\"_blank\" href=\"%s\">%s</a>" path desc))
+      (`latex (format "\\href{%s}{%s}" path desc))
+      (`texinfo (format "@uref{%s,%s}" path desc))
+      (`ascii (format "%s (%s)" desc path))
+      (t path))))
+
+(org-link-set-parameters
+ "docbase"
+ :follow #'doc-base--org-link-follow
+ :export #'doc-base--org-link-export
+ :store  #'doc-base--org-link-store)
+
 (defun doc-base--get-inode-of-file (file)
   "get inode of a FILE"
   (string-to-number (string-trim (shell-command-to-string (format "stat -c '%%i' %s" file)))))

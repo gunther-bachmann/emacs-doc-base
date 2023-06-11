@@ -13,6 +13,3 @@ references point to those files (which will never be moved).  Now other files
 changing folder hierarchies without invalidating the org link. The org links can
 be resolved to the the file in this hierarchy, if needed.
 
-* TODO implement flow /refile/
-* TODO implement flow /persistent org-ref/
-
