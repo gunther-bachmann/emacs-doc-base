@@ -2,14 +2,41 @@
 WARNING: This project is currently under heavy development. Use at your own risk.
 
 * Rationale
-DocBase is a set of tools useful to get the following
+DocBase is a set of tools useful to do the following
 - file documents in a folder hierarchy that may change any time
 - have persistent org references to these files
 - provide a useful ui to file new documents
- 
+
 This is done by creating hard links of all files in a single folder.  Org
 references point to those files (which will never be moved).  Now other files
 (hard linked) to these files (in the doc-base) can now be safely filed into
 changing folder hierarchies without invalidating the org link. The org links can
 be resolved to the the file in this hierarchy, if needed.
 
+Care has to be taken to ensure that backup keeps this information. I had to
+write some additional scripts to keep this information because duplicity does
+not support hard links.
+
+
+* Usage
+** Filing documents
+- open a dired buffer with the documents that need to be filed
+- move cursor over document
+- ~M-x doc-base--file~
+  This will ask for the normalized name of the file (providing a proposal), the
+  file name used in the docbase and final acknowledgement. These steps can be
+  skipped by using the universial argument (~C-u~).
+  Then a sidebar is opened (or jumped to, if alread open) and the key '~i~' is
+  remapped to a doc-base function that moves the file into the selected folder.
+- Move the cursor to the folder to file the document into
+- Hit '~i~' to execute the filing process
+** Repeated filing
+If the next file selected in dired should be filed into the same folder, execute
+~M-x doc-base--file-repeat~ which will do the above steps without user
+interaction. This operation may also be applied to all marked files in the dired
+buffer.
+** Creating persistent org-links into the docbase
+Execute ~M-x org-store-link~ in a dired buffer. If this file is also hard linked
+in the docbase a persistent link is created that can be inserted into an org
+file via ~M-x org-insert-link~. If the given file is not present in the docbase, a
+regular file link is created.

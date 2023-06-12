@@ -3,6 +3,8 @@
 (require 'bind-key)
 (require 'dash)
 (require 'compat)
+(require 'ol)
+(eval-when-compile (require 'cl-lib))
 
 (defgroup doc-base nil
   "filing documents from dired"
@@ -13,11 +15,13 @@
   "root to place documents into"
   :type 'string
   :group 'doc-base)
+
 (defcustom doc-base--books
   (expand-file-name "~/documents/books")
   "root of dir structure for documents"
   :type 'string
   :group 'doc-base)
+
 (defcustom doc-base--valid-filename-chars
   "a-z0-9-._"
   "regexp character-set definition"
@@ -74,7 +78,7 @@
       (`latex (format "\\href{%s}{%s}" path desc))
       (`texinfo (format "@uref{%s,%s}" path desc))
       (`ascii (format "%s (%s)" desc path))
-      (t path))))
+      (_ path))))
 
 (org-link-set-parameters
  "docbase"
