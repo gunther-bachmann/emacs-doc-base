@@ -34,22 +34,6 @@
 (defvar doc-base--last-target nil "previous filing target")
 (defvar doc-base--last-filing-universial-argument nil "universial argument of last filing operation")
 
-;; flow: inbox (function: doc-base--file)
-;; - identify document in dired 
-;; - execute doc-base-file command on this document
-;; - normalize filename (in place)
-;; - create hardlink in doc-base
-;; - move/rename document into books dir tree structure through separate dired-sidebar
-
-;; flow: refile in doc tree (function:)
-;; - identify document in dired
-;; - move/rename document into book dir tree structure through separate dired-sidebar
-
-;; flow: persistent org reference to file (function:)
-;; - get i-node of file
-;; - get doc-base name for i-node
-;; - provide reference to doc-base name
-
 (defun doc-base--org-link-follow (path _)
   (if-let* ((inode (doc-base--get-inode-of-file (format "%s/%s" doc-base--root path)))
               (file (doc-base--find-inode-in-books inode)))
@@ -104,8 +88,6 @@
     (unless (string-empty-p fn)
       fn)))
 
-;; (doc-base--find-inode-in-books (doc-base--get-inode-of-file "/home/pe/documents/docbase/20230608.anatomy_of_lisp.pdf"))
-
 (defun doc-base--normalize-name (filename)
   "normalize the given base FILENAME"
   (replace-regexp-in-string (format "[^%s]" doc-base--valid-filename-chars) "_" (downcase filename)))
@@ -113,18 +95,6 @@
 (defun doc-base--normal-name-p (filename)
   "is this base FILENAME already normalized?"
   (string-equal filename (doc-base--normalize-name filename)))
-
-;; tree = (list "name" te1 te2 ...)
-;; tree-elemnent = tree
-
-;; (defun doc-base--read-directory-tree- (folder)
-;;   (cons "<here>"
-;;         (sort
-;;          (--map (s-chop-prefix "/" it)
-;;                 (--filter (not (seq-empty-p it))
-;;                           (--map (s-chop-prefix folder it)
-;;                                  (string-split (shell-command-to-string (format "find %s -maxdepth 1 -type d " folder))))))
-;;          'string<)))
 
 (defun doc-base--refresh-views-on-dirs (folders)
   "revert all dired buffers showing the given FOLDERS"
@@ -153,7 +123,8 @@
                (list (file-name-directory doc-base--file-to-move)
                      (file-name-directory new-name)                     
                      doc-base--root
-                     doc-base--source-dired-buffer
+                     (with-current-buffer doc-base--source-dired-buffer
+                       default-directory)
                      doc-base--books))
               (setq doc-base--source-dired-buffer nil)
               (setq doc-base--file-to-move nil)
@@ -186,10 +157,6 @@
   (unbind-key "i" dired-sidebar-mode-map)
   (bind-key "i" doc-base--previous-function-in-dired-sidebar dired-sidebar-mode-map))
 
-;; (defun doc-base--select-target-dir (folder)
-;;   (let ((ivy-sort-functions-alist nil))
-;;     (completing-read "file to: " (doc-base--read-directory-tree- doc-base--books) nil t)))
-
 (defun doc-base--add-document-to-docbase (file &optional yes)
   "add given FILE (document) to the docbase (do renaming if necessary)
  returning t on success, nil on abort"
@@ -203,7 +170,7 @@
          (link-file-name-proposed (string-join (list dateprefix normalized-base name-ext) "."))
          (link-file-name (if yes link-file-name-proposed (read-string "filename for docbase: " link-file-name-proposed)))
          (link-name (string-join (list doc-base--root link-file-name) "/"))
-         (rename-p (not (doc-base--normal-name-p name-base)))
+         (rename-p (not (string-equal normalized-base name-base)))
          (msg (if rename-p
                   (format "rename %s\n-> %s,\nhardlinking %s" file normalized-file link-file-name)
                 (format "hardlinking %s" link-file-name))))
@@ -223,25 +190,6 @@
             nil))
       (message "aborted.")
       nil)))
-
-(defun doc-base--file-repeat ()
-  "repeat last filing operation on current file or marked files"
-  (interactive)
-  (if doc-base--last-target
-      (progn
-        (let ((files-to-process (--filter (and it (not (file-directory-p it)) (file-exists-p it))
-                                          (dired-get-marked-files))))
-          (-each files-to-process
-            (lambda (file) (let ((normalized-file (doc-base--do-normalize file)))
-                          (doc-base--do-add normalized-file)
-                          (doc-base--do-file doc-base--last-target normalized-file))))
-          (doc-base--refresh-views-on-dirs
-           (list
-            (expand-file-name default-directory)
-            doc-base--books
-            doc-base--root
-            doc-base--last-target))))
-    (message "no target known (did you file a document?)")))
 
 (defun doc-base--do-normalize (file)
   "normalize the given FILE and execute rename"
@@ -270,6 +218,27 @@
          (target-file (string-join (list doc-base--last-target normalized-base "." name-ext) "")))
     (dired-rename-file normalized-file target-file nil)))
 
+;;;###autoload
+(defun doc-base--file-repeat ()
+  "repeat last filing operation on current file or marked files"
+  (interactive)
+  (if doc-base--last-target
+      (progn
+        (let ((files-to-process (--filter (and it (not (file-directory-p it)) (file-exists-p it))
+                                          (dired-get-marked-files))))
+          (-each files-to-process
+            (lambda (file) (let ((normalized-file (doc-base--do-normalize file)))
+                          (doc-base--do-add normalized-file)
+                          (doc-base--do-file doc-base--last-target normalized-file))))
+          (doc-base--refresh-views-on-dirs
+           (list
+            (expand-file-name default-directory)
+            doc-base--books
+            doc-base--root
+            doc-base--last-target))))
+    (message "no target known (did you file a document?)")))
+
+;;;###autoload
 (defun doc-base--file ()
   "interactive file a document under cursor in dired mode
  (cannot be run on files already in the docbase, this is checked)"
