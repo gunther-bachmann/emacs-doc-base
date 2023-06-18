@@ -51,10 +51,10 @@
 
 (ert-deftest doc-base--org-link-store-props-test ()
   "create plist from docbase file usable for #'org-link-store-props"
-  (should (equalp (list :type "docbase"
-                        :link "docbase:20230609.prescheme.pdf"
-                        :description "prescheme.pdf")
-                  (doc-base--org-link-store-props "/home/pe/documents/docbase/20230609.prescheme.pdf"))))
+  (should (cl-equalp (list :type "docbase"
+                           :link "docbase:20230609.prescheme.pdf"
+                           :description "prescheme.pdf")
+                     (doc-base--org-link-store-props "/home/pe/documents/docbase/20230609.prescheme.pdf"))))
 
 (defun doc-base--org-link-store ()
   "Store a link to a dired file in the doc base."
@@ -113,7 +113,7 @@
 
 (defun doc-base--find-inode-in (inode folder)
   "get filename for an INODE in FOLDER"
-  (let ((fn (string-trim (shell-command-to-string (doc-base--find-inode-in-command folder inode)))))
+  (let ((fn (string-trim (shell-command-to-string (doc-base--find-inode-in-command inode folder)))))
     (unless (string-empty-p fn)
       fn)))
 
@@ -144,8 +144,8 @@
 
 (ert-deftest doc-base--insert-document-into-dired-sidebar--new-filename-test ()
   "test generation of new filename for target folder"
-  (shoud (string-equal (doc-base--insert-document-into-dired-sidebar--gen-new-name "/my/some-folder/" "/some/other/location/test.file.txt")
-                       "/my/some-folder/test.file.txt")))
+  (should (string-equal (doc-base--insert-document-into-dired-sidebar--gen-new-name "/my/some-folder/" "/some/other/location/test.file.txt")
+                        "/my/some-folder/test.file.txt")))
 
 (defun doc-base--insert-document-into-dired-sidebar ()
   "file/move/rename doc initially identified for filing 
@@ -178,23 +178,17 @@
     (message "file '%s' not found for moving (maybe just old binding of 'i', will now be restored)" doc-base--file-to-move))
   (doc-base--cleanup-bindings))
 
+(defun doc-base--bind-insert-key-for-dired-sidebar ()
+  "bind 'i' to doc-base--insert-... command, keeping old binding for restoring later"
+  (unless (cl-equalp #'doc-base--insert-document-into-dired-sidebar
+                     (keymap-lookup dired-sidebar-mode-map "i"))
+    (setq doc-base--previous-function-in-dired-sidebar (keymap-lookup dired-sidebar-mode-map "i")))
+  (bind-key "i" #'doc-base--insert-document-into-dired-sidebar dired-sidebar-mode-map))
+
 (defun doc-base--provide-dired-sidebar-for-filing ()
   "open sidbar and bind 'i' for inserting previously selected document"
-  (let ((default-directory doc-base--books))
-    (when (not (cl-equalp #'doc-base--insert-document-into-dired-sidebar
-                     (keymap-lookup dired-sidebar-mode-map "i")))
-      (setq doc-base--previous-function-in-dired-sidebar (keymap-lookup dired-sidebar-mode-map "i")))
-    (bind-key "i" #'doc-base--insert-document-into-dired-sidebar dired-sidebar-mode-map)
-    (if (and (dired-sidebar-buffer)
-           (string-equal
-            (expand-file-name
-             (with-current-buffer (dired-sidebar-buffer)
-               dired-directory))
-            (format "%s/" doc-base--books)))
-        (dired-sidebar-jump-to-sidebar)
-      (when (dired-sidebar-buffer)
-        (dired-sidebar-hide-sidebar))
-      (dired-sidebar-toggle-with-current-directory))))
+  (doc-base--bind-insert-key-for-dired-sidebar)
+  (doc-base--open-sidebar))
 
 (defun doc-base--cleanup-bindings ()
   "cleanup (possibly) dangling insert binding from dired-sidebar"
@@ -204,36 +198,32 @@
 (defun doc-base--add-document-to-docbase (file &optional yes)
   "add given FILE (document) to the docbase (do renaming if necessary)
  returning t on success, nil on abort"
-  (let* ((name-base (file-name-base file))
-         (name-ext (file-name-extension file))
-         (normalized-base-proposed (doc-base--normalize-name name-base))
-         (normalized-base          (if yes
-                                       normalized-base-proposed
-                                     (read-string "new filename: " normalized-base-proposed)))
-         (normalized-file          (string-join (list normalized-base name-ext) "."))
-         (dateprefix               (format-time-string "%Y%m%d" (current-time)))
-         (normalized               (string-join (list (file-name-directory file) normalized-file) ""))
-         (link-file-name-proposed  (string-join (list dateprefix normalized-base name-ext) "."))
-         (link-file-name           (if yes
-                                       link-file-name-proposed
-                                     (read-string "filename for docbase: " link-file-name-proposed)))
-         (link-name                (string-join (list doc-base--root link-file-name) "/"))
-         (rename-p                 (not (string-equal normalized-base name-base)))
+  (let* ((normalized-name-proposed (doc-base--normalize-name (file-name-nondirectory file)))
+         (normalized-name          (if yes
+                                       normalized-name-proposed
+                                     (read-string "new filename: " normalized-name-proposed)))
+         (normalized               (format "%s%s" (file-name-directory file) normalized-name))
+         (link-name-proposed       (doc-base--do-add--link-name normalized-name))
+         (link-name                (if yes
+                                       link-name-proposed
+                                     (read-string "filename for docbase: " link-name-proposed)))
+         (link                     (format "%s/%s" doc-base--root link-name))
+         (rename-p                 (not (string-equal normalized-name (file-name-nondirectory file))))
          (msg                      (if rename-p
                                        (format "rename %s\n-> %s,\nhardlinking %s"
                                                file
-                                               normalized-file
-                                               link-file-name)
-                                     (format "hardlinking %s" link-file-name))))
+                                               normalized-name
+                                               link-name)
+                                     (format "hardlinking %s" link-name))))
     (if (or yes (yes-or-no-p msg))
         (progn
           (unwind-protect
               (progn
                 (when rename-p (dired-rename-file file normalized nil))
-                (dired-hardlink normalized link-name)
+                (dired-hardlink normalized link)
                 (doc-base--refresh-views-on-dirs
                  (list (file-name-directory normalized)
-                       (file-name-directory link-name)))
+                       (file-name-directory link)))
                 (message (if rename-p "renaming and hardlinking done." "hardlinking done."))
                 (setq doc-base--file-to-move normalized)
                 t)
@@ -254,27 +244,43 @@
       (dired-rename-file file normalized nil))
     normalized))
 
-(defun doc-base--do-add--link-name (normalized-file root &optional ctime)
+(defun doc-base--do-add--link-name (normalized-file &optional ctime)
   (let ((dateprefix (format-time-string "%Y%m%d" (or ctime (current-time)))))
-    (format "%s/%s.%s" root dateprefix (file-name-nondirectory normalized-file))))
+    (format "%s.%s" dateprefix (file-name-nondirectory normalized-file))))
 
 (ert-deftest doc-base--do-add--link-name-test ()
   "test the generated link name for the doc base"
   (should (string-equal
-           "/some/doc/base/20230618.some-normalized.file.pdf"
-           (doc-base--do-add--link-name "/a/b/c/some-normalized.file.pdf" "/some/doc/base"
+           "20230618.some-normalized.file.pdf"
+           (doc-base--do-add--link-name "/a/b/c/some-normalized.file.pdf"
                                         '(25743 2096 727303 465000)))))
 
 (defun doc-base--do-add (normalized-file)
   "add th egiven NORMALIZED-FILE to the doc base"
   (dired-hardlink normalized-file
-                  (doc-base--do-add--link-name normalized-file doc-base--root)))
+                  (format "%s/%s" doc-base--root (doc-base--do-add--link-name normalized-file))))
 
 (defun doc-base--do-file (target-folder normalized-file)
   "file this NORMALIZED-FILE to the given TARGET-FOLDER"
   (dired-rename-file normalized-file
                      (format "%s%s" doc-base--last-target (file-name-nondirectory normalized-file))
                      nil))
+
+;;;###autoload
+(defun doc-base--open-sidebar ()
+  "open sidbar into docbase (e.g. to inspect current filing tree)"
+  (interactive)
+  (let ((default-directory doc-base--books))
+    (if (and (dired-sidebar-buffer)
+           (string-equal
+            (expand-file-name
+             (with-current-buffer (dired-sidebar-buffer)
+               dired-directory))
+            (format "%s/" doc-base--books)))
+        (dired-sidebar-jump-to-sidebar)
+      (when (dired-sidebar-buffer)
+        (dired-sidebar-hide-sidebar))
+      (dired-sidebar-toggle-with-current-directory))))
 
 ;;;###autoload
 (defun doc-base--file-repeat ()
