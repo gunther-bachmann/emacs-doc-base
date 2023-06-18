@@ -35,10 +35,26 @@
 (defvar doc-base--last-filing-universial-argument nil "universial argument of last filing operation")
 
 (defun doc-base--org-link-follow (path _)
+  "open file referenced by document in docbase PATH"
   (if-let* ((inode (doc-base--get-inode-of-file (format "%s/%s" doc-base--root path)))
-              (file (doc-base--find-inode-in-books inode)))
+            (file  (doc-base--find-inode-in-books inode)))
       (find-file file)
     (find-file path)))
+
+(defun doc-base--org-link-store-props (docbase-file)
+  "get plist of DOCBASE-FILE for #'org-link-store-props"
+  (when-let* ((link (concat "docbase:" (file-name-nondirectory docbase-file)))
+              (description (replace-regexp-in-string "^[0-9.]*" "" (file-name-nondirectory docbase-file))))
+    (list :type "docbase"
+          :link link
+          :description description)))
+
+(ert-deftest doc-base--org-link-store-props-test ()
+  "create plist from docbase file usable for #'org-link-store-props"
+  (should (equalp (list :type "docbase"
+                        :link "docbase:20230609.prescheme.pdf"
+                        :description "prescheme.pdf")
+                  (doc-base--org-link-store-props "/home/pe/documents/docbase/20230609.prescheme.pdf"))))
 
 (defun doc-base--org-link-store ()
   "Store a link to a dired file in the doc base."
@@ -46,13 +62,9 @@
     ;; This is a man page, we do make this link.
     (when-let* ((file (dired-get-file-for-visit))
                 (inode (doc-base--get-inode-of-file file))
-                (docbase-file (doc-base--find-inode-in-doc-base inode))
-                (link (concat "docbase:" (file-name-nondirectory docbase-file)))
-                (description (replace-regexp-in-string "^[0-9.]*" "" (file-name-nondirectory docbase-file))))
-      (org-link-store-props
-       :type "docbase"
-       :link link
-       :description description))))
+                (docbase-file (doc-base--find-inode-in-doc-base inode)))
+      (apply #'org-link-store-props 
+       (doc-base--org-link-store-props docbase-file)))))
 
 (defun doc-base--org-link-export (link description format _)
   (let ((path (format "%s" link))
@@ -70,9 +82,18 @@
  :export #'doc-base--org-link-export
  :store  #'doc-base--org-link-store)
 
+(defun doc-base--get-inode-of-file-command (file)
+  "create shell command to get inode # of FILE"
+  (format "stat -c '%%i' '%s'" file))
+
+(ert-deftest doc-base--get-inode-of-file-command-test ()
+  "test shell command generation for idnode retrieval"
+  (should (string-equal "stat -c '%i' 'some file. with!.$spaces * andmore.txt'"
+                        (doc-base--get-inode-of-file-command "some file. with!.$spaces * andmore.txt"))))
+
 (defun doc-base--get-inode-of-file (file)
   "get inode of a FILE"
-  (string-to-number (string-trim (shell-command-to-string (format "stat -c '%%i' %s" file)))))
+  (string-to-number (string-trim (shell-command-to-string (doc-base--get-inode-of-file-command file)))))
 
 (defun doc-base--find-inode-in-doc-base (inode)
   "get doc-base filename for an INODE"
@@ -82,15 +103,28 @@
   "get doc-base filename for an INODE"
   (doc-base--find-inode-in inode doc-base--books))
 
+(defun doc-base--find-inode-in-command (inode folder)
+    (format "find '%s' -inum %i" folder inode))
+
+(ert-deftest doc-base--find-inode-in-command-test ()
+  "test shell command generation for locating inodes in folder"
+  (should (string-equal "find 'some & file.txt' -inum 4711"
+                        (doc-base--find-inode-in-command 4711 "some & file.txt"))))
+
 (defun doc-base--find-inode-in (inode folder)
   "get filename for an INODE in FOLDER"
-  (let ((fn (string-trim (shell-command-to-string (format "find %s -inum %i" folder inode)))))
+  (let ((fn (string-trim (shell-command-to-string (doc-base--find-inode-in-command folder inode)))))
     (unless (string-empty-p fn)
       fn)))
 
 (defun doc-base--normalize-name (filename)
   "normalize the given base FILENAME"
   (replace-regexp-in-string (format "[^%s]" doc-base--valid-filename-chars) "_" (downcase filename)))
+
+(ert-deftest doc-base--normalize-name-test () 
+  "test file name normalisation"
+  (should (string-equal "2__s_sd.ldner.pa_11d"
+                        (doc-base--normalize-name "2;'sösd.ldner.pa+11d"))))
 
 (defun doc-base--normal-name-p (filename)
   "is this base FILENAME already normalized?"
@@ -103,6 +137,16 @@
       (--each (dired-buffers-for-dir folder )
         (with-current-buffer it (revert-buffer))))))
 
+(defun doc-base--insert-document-into-dired-sidebar--gen-new-name (target-folder file)
+    "generate new name for current marked file to put into TARGET-FOLDER"
+  (format "%s%s" target-folder
+          (file-name-nondirectory file)))
+
+(ert-deftest doc-base--insert-document-into-dired-sidebar--new-filename-test ()
+  "test generation of new filename for target folder"
+  (shoud (string-equal (doc-base--insert-document-into-dired-sidebar--gen-new-name "/my/some-folder/" "/some/other/location/test.file.txt")
+                       "/my/some-folder/test.file.txt")))
+
 (defun doc-base--insert-document-into-dired-sidebar ()
   "file/move/rename doc initially identified for filing 
  into folder currently under cursor in the sidebar"
@@ -110,12 +154,12 @@
   (setq doc-base--last-target nil)
   (if (and (cl-equalp major-mode 'dired-sidebar-mode)
          (file-exists-p doc-base--file-to-move))
-      (when-let* ((target (or (dired-file-name-at-point) doc-base--books))
-                  (_ (file-exists-p target))
+      (when-let* ((target        (or (dired-file-name-at-point) doc-base--books))
+                  (_             (file-exists-p target))
                   (target-folder (file-name-directory target))
-                  (new-name (format "%s%s.%s" target-folder
-                                    (file-name-base doc-base--file-to-move)
-                                    (file-name-extension doc-base--file-to-move))))
+                  (new-name      (doc-base--insert-document-into-dired-sidebar--gen-new-name
+                                  target-folder
+                                  doc-base--file-to-move)))
         (unwind-protect
             (progn
               (dired-rename-file doc-base--file-to-move new-name nil)
@@ -163,17 +207,24 @@
   (let* ((name-base (file-name-base file))
          (name-ext (file-name-extension file))
          (normalized-base-proposed (doc-base--normalize-name name-base))
-         (normalized-base (if yes normalized-base-proposed (read-string "new filename: " normalized-base-proposed)))
-         (normalized-file (string-join (list normalized-base name-ext) "."))
-         (dateprefix (format-time-string "%Y%m%d" (current-time)))
-         (normalized (string-join (list (file-name-directory file) normalized-file) ""))
-         (link-file-name-proposed (string-join (list dateprefix normalized-base name-ext) "."))
-         (link-file-name (if yes link-file-name-proposed (read-string "filename for docbase: " link-file-name-proposed)))
-         (link-name (string-join (list doc-base--root link-file-name) "/"))
-         (rename-p (not (string-equal normalized-base name-base)))
-         (msg (if rename-p
-                  (format "rename %s\n-> %s,\nhardlinking %s" file normalized-file link-file-name)
-                (format "hardlinking %s" link-file-name))))
+         (normalized-base          (if yes
+                                       normalized-base-proposed
+                                     (read-string "new filename: " normalized-base-proposed)))
+         (normalized-file          (string-join (list normalized-base name-ext) "."))
+         (dateprefix               (format-time-string "%Y%m%d" (current-time)))
+         (normalized               (string-join (list (file-name-directory file) normalized-file) ""))
+         (link-file-name-proposed  (string-join (list dateprefix normalized-base name-ext) "."))
+         (link-file-name           (if yes
+                                       link-file-name-proposed
+                                     (read-string "filename for docbase: " link-file-name-proposed)))
+         (link-name                (string-join (list doc-base--root link-file-name) "/"))
+         (rename-p                 (not (string-equal normalized-base name-base)))
+         (msg                      (if rename-p
+                                       (format "rename %s\n-> %s,\nhardlinking %s"
+                                               file
+                                               normalized-file
+                                               link-file-name)
+                                     (format "hardlinking %s" link-file-name))))
     (if (or yes (yes-or-no-p msg))
         (progn
           (unwind-protect
@@ -191,32 +242,39 @@
       (message "aborted.")
       nil)))
 
+(defun doc-base--normalized-file (file)
+  (let* ((file-name       (file-name-nondirectory file))
+         (normalized-file (doc-base--normalize-name file-name)))
+    (format "%s%s" (file-name-directory file) normalized-file)))
+
 (defun doc-base--do-normalize (file)
   "normalize the given FILE and execute rename"
-  (let* ((name-base (file-name-base file))
-         (name-ext (file-name-extension file))
-         (normalized-base (doc-base--normalize-name name-base))
-         (normalized-file (string-join (list normalized-base name-ext) "."))
-         (normalized (string-join (list (file-name-directory file) normalized-file) ""))
-         (rename-p (not (doc-base--normal-name-p name-base))))
-    (when rename-p (dired-rename-file file normalized nil))
+  (let* ((normalized (doc-base--normalized-file file)))
+    (unless (string-equal file normalized)
+      (dired-rename-file file normalized nil))
     normalized))
 
+(defun doc-base--do-add--link-name (normalized-file root &optional ctime)
+  (let ((dateprefix (format-time-string "%Y%m%d" (or ctime (current-time)))))
+    (format "%s/%s.%s" root dateprefix (file-name-nondirectory normalized-file))))
+
+(ert-deftest doc-base--do-add--link-name-test ()
+  "test the generated link name for the doc base"
+  (should (string-equal
+           "/some/doc/base/20230618.some-normalized.file.pdf"
+           (doc-base--do-add--link-name "/a/b/c/some-normalized.file.pdf" "/some/doc/base"
+                                        '(25743 2096 727303 465000)))))
+
 (defun doc-base--do-add (normalized-file)
-  "add then given NORMALIZED-FILE to the doc base"
-  (let* ((dateprefix (format-time-string "%Y%m%d" (current-time)))
-         (normalized-base (file-name-base normalized-file))
-         (name-ext (file-name-extension normalized-file))
-         (link-file-name (string-join (list dateprefix normalized-base name-ext) "."))
-         (link-name (string-join (list doc-base--root link-file-name) "/")))
-    (dired-hardlink normalized-file link-name)))
+  "add th egiven NORMALIZED-FILE to the doc base"
+  (dired-hardlink normalized-file
+                  (doc-base--do-add--link-name normalized-file doc-base--root)))
 
 (defun doc-base--do-file (target-folder normalized-file)
   "file this NORMALIZED-FILE to the given TARGET-FOLDER"
-  (let* ((normalized-base (file-name-base normalized-file))
-         (name-ext (file-name-extension normalized-file))
-         (target-file (string-join (list doc-base--last-target normalized-base "." name-ext) "")))
-    (dired-rename-file normalized-file target-file nil)))
+  (dired-rename-file normalized-file
+                     (format "%s%s" doc-base--last-target (file-name-nondirectory normalized-file))
+                     nil))
 
 ;;;###autoload
 (defun doc-base--file-repeat ()
@@ -224,8 +282,11 @@
   (interactive)
   (if doc-base--last-target
       (progn
-        (let ((files-to-process (--filter (and it (not (file-directory-p it)) (file-exists-p it))
-                                          (dired-get-marked-files))))
+        (let ((files-to-process
+               (--filter (and it
+                            (not (file-directory-p it))
+                            (file-exists-p it))
+                         (dired-get-marked-files))))
           (-each files-to-process
             (lambda (file) (let ((normalized-file (doc-base--do-normalize file)))
                           (doc-base--do-add normalized-file)
